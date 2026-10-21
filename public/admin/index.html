@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Administration</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&display=swap">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{ink:"#0a0615",panel:"#130e1f",line:"#2a2140",accent:"#8b5cf6",mute:"#9a90b5"}}}}</script>
+<style>
+body{background:#0a0615;color:#ece8f5;font-family:Manrope,system-ui,sans-serif;color-scheme:dark}
+.fld{width:100%;border-radius:.5rem;border:1px solid #2a2140;background:#0a0615;padding:.5rem .75rem;font-size:.875rem;outline:none}
+.fld:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px #8b5cf655}
+.lb{display:block;margin-bottom:.25rem;font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:#9a90b5}
+.btn{border-radius:.5rem;background:#8b5cf6;padding:.5rem 1rem;font-size:.875rem;font-weight:600;color:#fff}.btn:hover{background:#7c3aed}.btn:disabled{opacity:.6}
+.ghost{display:inline-block;border:1px solid #2a2140;border-radius:.5rem;padding:.375rem .75rem;font-size:.875rem}.ghost:hover{background:#ffffff0d}
+.hint{margin-top:.25rem;font-size:.75rem;color:#9a90b5}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s), app = $("#app");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const lines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
+const toEntries = (s) => lines(s).map((l) => { const [period = "", title = "", place = ""] = l.split("|").map((x) => x.trim()); return { period, title, place }; });
+const fromEntries = (a) => a.map((e) => `${e.period} | ${e.title} | ${e.place}`).join("\n");
+const CAT = { web: "Développement web", graphisme: "Design graphique", autre: "Autre" };
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, credentials: "same-origin", headers: method === "GET" ? {} : { "Content-Type": "application/json" }, body: method === "GET" ? undefined : JSON.stringify(body ?? {}) });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && url !== "/api/login") { loginView(); throw new Error("auth"); }
+  if (!r.ok) throw new Error(d.error || "Erreur");
+  return d;
+}
+const msg = (el, text, ok) => { el.textContent = text; el.className = "text-sm " + (ok ? "text-emerald-400" : "text-red-400"); };
+
+function field(label, name, value = "", { area = 0, type = "text", hint = "" } = {}) {
+  const input = area ? `<textarea id="${name}" name="${name}" rows="${area}" class="fld">${esc(value)}</textarea>` : `<input id="${name}" name="${name}" type="${type}" value="${esc(value)}" class="fld">`;
+  return `<div><label class="lb" for="${name}">${label}</label>${input}${hint ? `<p class="hint">${hint}</p>` : ""}</div>`;
+}
+
+/* ---------- connexion ---------- */
+function loginView() {
+  app.innerHTML = `<main class="flex min-h-screen items-center justify-center px-4">
+    <form id="f" class="w-full max-w-sm space-y-4 rounded-2xl border border-line bg-panel p-6">
+      <p class="text-xs uppercase tracking-[.3em] text-accent">Administration</p>
+      <h1 class="text-2xl font-semibold">Connexion</h1>
+      ${field("Email", "email", "", { type: "email" })}${field("Mot de passe", "password", "", { type: "password" })}
+      <p id="m"></p><button class="btn w-full">Se connecter</button>
+    </form></main>`;
+  $("#email").autocomplete = "username"; $("#password").autocomplete = "current-password";
+  $("#f").onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api("POST", "/api/login", { email: $("#email").value, password: $("#password").value }); route(); }
+    catch (err) { msg($("#m"), err.message); }
+  };
+}
+
+/* ---------- cadre ---------- */
+function shell(title, html) {
+  const link = (h, l) => `<a href="#/${h}" class="rounded-lg px-3 py-2 text-sm text-mute hover:bg-white/5 hover:text-white">${l}</a>`;
+  app.innerHTML = `<div class="flex min-h-screen flex-col md:flex-row">
+    <aside class="border-b border-line p-4 md:w-60 md:border-b-0 md:border-r">
+      <p class="mb-4 text-sm font-semibold"><span class="text-accent">●</span> Admin · Portfolio</p>
+      <nav class="flex flex-wrap gap-2 md:flex-col">${link("", "Dashboard")}${link("projects", "Projets")}${link("profile", "Profil")}
+        <a href="/" target="_blank" class="rounded-lg px-3 py-2 text-sm text-mute hover:bg-white/5 hover:text-white">Voir le site ↗</a></nav>
+      <button id="out" class="ghost mt-4 w-full md:mt-8">Déconnexion</button>
+    </aside>
+    <main class="flex-1 p-5 md:p-8"><h1 class="mb-6 text-2xl font-semibold">${title}</h1>${html}</main></div>`;
+  $("#out").onclick = async () => { await api("POST", "/api/logout", {}); loginView(); };
+}
+
+/* ---------- vues ---------- */
+async function dashboard() {
+  const list = await api("GET", "/api/admin/projects");
+  const st = [["Projets", list.length], ["Publiés", list.filter((p) => p.published).length], ["Brouillons", list.filter((p) => !p.published).length], ["Mis en avant", list.filter((p) => p.featured).length]];
+  shell("Dashboard", `<div class="grid grid-cols-2 gap-4 lg:grid-cols-4">${st.map(([l, n]) => `<div class="rounded-2xl border border-line bg-panel p-5"><p class="text-xs uppercase tracking-wider text-mute">${l}</p><p class="mt-2 text-3xl font-semibold text-accent">${n}</p></div>`).join("")}</div>
+    <div class="mt-6 flex gap-3"><a href="#/projects/new" class="btn">+ Nouveau projet</a><a href="#/profile" class="ghost">Modifier mon profil</a></div>
+    <section class="mt-8 rounded-2xl border border-line bg-panel p-5"><h2 class="mb-3 font-medium">Derniers projets</h2>
+    ${list.length ? `<ul class="divide-y divide-line">${list.slice(0, 5).map((p) => `<li class="flex justify-between py-2 text-sm"><a class="hover:text-accent" href="#/projects/${p.id}">${esc(p.title)}</a><span class="text-mute">${p.published ? "Publié" : "Brouillon"}</span></li>`).join("")}</ul>` : `<p class="text-sm text-mute">Aucun projet pour l’instant.</p>`}</section>`);
+}
+
+async function projects() {
+  const list = await api("GET", "/api/admin/projects");
+  shell("Projets", `<a href="#/projects/new" class="btn mb-4 inline-block">+ Nouveau</a>
+    <div class="overflow-x-auto rounded-2xl border border-line bg-panel"><table class="w-full text-left text-sm">
+    <thead class="border-b border-line text-xs uppercase tracking-wider text-mute"><tr><th class="p-3">Titre</th><th class="p-3">Catégorie</th><th class="p-3">Statut</th><th></th></tr></thead>
+    <tbody class="divide-y divide-line">${list.map((p) => `<tr><td class="p-3 font-medium">${esc(p.title)}${p.featured ? ' <span class="text-accent">★</span>' : ""}</td><td class="p-3 text-mute">${CAT[p.category]}</td><td class="p-3">${p.published ? "Publié" : "Brouillon"}</td>
+      <td class="flex justify-end gap-2 p-3"><a class="ghost" href="#/projects/${p.id}">Modifier</a><button class="ghost text-red-400" data-del="${p.id}">Supprimer</button></td></tr>`).join("") || `<tr><td colspan="4" class="p-6 text-center text-mute">Aucun projet. Crée le premier !</td></tr>`}</tbody></table></div>`);
+  document.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    if (confirm("Supprimer définitivement ce projet ?")) { await api("DELETE", "/api/admin/projects/" + b.dataset.del); projects(); }
+  });
+}
+
+async function projectForm(id) {
+  const p = id ? (await api("GET", "/api/admin/projects")).find((x) => x.id === id) : {};
+  if (id && !p) { location.hash = "#/projects"; return; }
+  shell(id ? "Modifier : " + esc(p.title) : "Nouveau projet", `<form id="f" class="max-w-2xl space-y-4 rounded-2xl border border-line bg-panel p-5">
+    ${field("Titre *", "title", p.title)}
+    <div><label class="lb" for="category">Catégorie</label><select id="category" class="fld">${Object.entries(CAT).map(([k, v]) => `<option value="${k}" ${p.category === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+    ${field("Résumé", "summary", p.summary, { hint: "300 caractères max." })}
+    ${field("Description", "description", p.description, { area: 5 })}
+    ${field("Image de couverture (URL)", "coverUrl", p.coverUrl, { hint: "Lien https://… ou /images/mon-image.jpg (fichier placé dans le dossier public/images)." })}
+    <div class="grid gap-4 sm:grid-cols-2">${field("Lien du site", "liveUrl", p.liveUrl)}${field("Lien du code", "repoUrl", p.repoUrl)}</div>
+    ${field("Tags", "tags", (p.tags || []).join(", "), { hint: "Séparés par des virgules : Next.js, Figma…" })}
+    ${field("Ordre d’affichage", "sortOrder", p.sortOrder ?? 0, { type: "number" })}
+    <div class="flex gap-6 text-sm"><label class="flex items-center gap-2"><input type="checkbox" id="published" class="accent-violet-500" ${p.published ? "checked" : ""}> Publié</label>
+      <label class="flex items-center gap-2"><input type="checkbox" id="featured" class="accent-violet-500" ${p.featured ? "checked" : ""}> Mis en avant</label></div>
+    <p id="m"></p><div class="flex gap-3"><button class="btn">Enregistrer</button><a href="#/projects" class="ghost">Annuler</a></div></form>`);
+  $("#f").onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { title: $("#title").value, category: $("#category").value, summary: $("#summary").value, description: $("#description").value, coverUrl: $("#coverUrl").value,
+      liveUrl: $("#liveUrl").value, repoUrl: $("#repoUrl").value, tags: $("#tags").value.split(","), sortOrder: $("#sortOrder").value, published: $("#published").checked, featured: $("#featured").checked };
+    try { await api(id ? "PUT" : "POST", "/api/admin/projects" + (id ? "/" + id : ""), body); location.hash = "#/projects"; }
+    catch (err) { msg($("#m"), err.message); }
+  };
+}
+
+async function profile() {
+  const p = await api("GET", "/api/admin/profile");
+  shell("Profil", `<form id="f" class="max-w-2xl space-y-4 rounded-2xl border border-line bg-panel p-5">
+    ${field("Nom complet *", "fullName", p.fullName)}${field("Titre / accroche", "title", p.title)}
+    ${field("Photo (URL ou /images/…)", "photoUrl", p.photoUrl, { hint: "Par défaut : /images/dieu-de-grace.jpg" })}
+    ${field("À propos", "bio", p.bio, { area: 6, hint: "Un paragraphe par ligne." })}
+    <div class="grid gap-4 sm:grid-cols-2">${field("Email", "email", p.email)}${field("Téléphone", "phone", p.phone)}</div>
+    ${field("Localisation", "location", p.location)}
+    <div class="grid gap-4 sm:grid-cols-2">${field("GitHub", "github", p.github)}${field("LinkedIn", "linkedin", p.linkedin)}${field("Instagram", "instagram", p.instagram)}${field("Behance", "behance", p.behance)}</div>
+    ${field("Compétences", "skills", p.skills.join("\n"), { area: 5, hint: "Une par ligne." })}
+    ${field("Langues", "languages", p.languages.join("\n"), { area: 4, hint: "Une par ligne." })}
+    ${field("Formations", "education", fromEntries(p.education), { area: 5, hint: "Une par ligne : période | intitulé | établissement" })}
+    ${field("Expériences", "experience", fromEntries(p.experience), { area: 4, hint: "Une par ligne : période | poste | structure" })}
+    <p id="m"></p><button class="btn">Enregistrer</button></form>`);
+  $("#f").onsubmit = async (e) => {
+    e.preventDefault();
+    const g = (k) => $("#" + k).value;
+    const body = { fullName: g("fullName"), title: g("title"), photoUrl: g("photoUrl"), bio: g("bio"), email: g("email"), phone: g("phone"), location: g("location"),
+      github: g("github"), linkedin: g("linkedin"), instagram: g("instagram"), behance: g("behance"),
+      skills: lines(g("skills")), languages: lines(g("languages")), education: toEntries(g("education")), experience: toEntries(g("experience")) };
+    try { await api("PUT", "/api/admin/profile", body); msg($("#m"), "Profil enregistré ✓", true); }
+    catch (err) { msg($("#m"), err.message); }
+  };
+}
+
+/* ---------- routage ---------- */
+async function route() {
+  try { await api("GET", "/api/admin/me"); } catch { return; }
+  const h = location.hash.replace(/^#\/?/, "");
+  if (h === "projects") return projects();
+  if (h === "projects/new") return projectForm(null);
+  if (/^projects\/\d+$/.test(h)) return projectForm(Number(h.split("/")[1]));
+  if (h === "profile") return profile();
+  return dashboard();
+}
+addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>
